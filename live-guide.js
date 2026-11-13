@@ -36,6 +36,25 @@ function findNail(image,centerX,centerY,guideDiameter,coinMm){
   const minHalf=Math.max(8,guide*.115),maxHalf=Math.min(guide*.39,width*.43);
   const edgeGap=clamp(guide*.023,2.5,7);
   const lineOffsets=[-guide*.017,0,guide*.017];
+  // A nail is surrounded by the rest of the fingertip. Look for the outer
+  // fingertip contour beyond BOTH nail edges; a finger silhouette alone
+  // is not sufficient evidence for the nail width.
+  const edgeMap=new Float32Array(width);
+  for(let x=5;x<width-5;x++){
+    const inner=rgbAt(data,width,height,x-3,centerY);
+    const outer=rgbAt(data,width,height,x+3,centerY);
+    edgeMap[x]=delta(inner,outer);
+  }
+  const beyond=(edge,direction)=>{
+    let strongest=0;
+    const lo=Math.max(8,Math.round(guide*.055)),hi=Math.round(guide*.245);
+    for(let step=lo;step<=hi;step+=2){
+      const x=Math.round(edge+direction*step);
+      if(x<5||x>=width-5)break;
+      if(edgeMap[x]>strongest)strongest=edgeMap[x];
+    }
+    return strongest;
+  };
   let best=null;
   for(let shift=-guide*.08;shift<=guide*.08;shift+=2.5){
     for(let half=minHalf;half<=maxHalf;half+=2){
@@ -54,6 +73,9 @@ function findNail(image,centerX,centerY,guideDiameter,coinMm){
       const balance=smaller/(larger+1e-6);
       // Texture, a single strong seam or one high-contrast edge is not a nail.
       if(smaller<10.5||balance<.44)continue;
+      // Guard against choosing the skin-to-background contour as a nail.
+      const leftOuter=beyond(lx,-1),rightOuter=beyond(rx,1);
+      if(Math.min(leftOuter,rightOuter)<15.5)continue;
       const mid=rgbAt(data,width,height,centerX+shift,centerY);
       // If the "inside" is partly skin rather than nail, the candidate often
       // comes from the OUTER FINGER contour. Reject such pairs instead of
