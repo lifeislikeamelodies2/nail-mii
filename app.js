@@ -23,10 +23,11 @@ function readChart(){
 const state={
   hand:'left',finger:0,mode:'coin',widths:readWidths(),chart:readChart(),
   hands:{left:{photo:null,coin:'10',calibration:null,points:Array(5).fill(null)},right:{photo:null,coin:'10',calibration:null,points:Array(5).fill(null)}},
-  draft:[],zoom:1,panX:0,panY:0,gesture:null,coinCenterPick:false,
+  draft:[],zoom:1,panX:0,panY:0,gesture:null,coinCenterPick:false,liveGuideOpen:false,
   stream:null,facing:'environment',cameraOpen:false
 };
 const current=()=>state.hands[state.hand];
+let liveGuide=null;
 let autoScanSerial=0;
 const suggestion=(h,i)=>{const p=h.autoNails?.[i]?.points; if(!p||p.length!==2)return null; const c=h.calibration; if(c){const d=dist(...c),mm=dist(...p)/d*COIN_MM[h.coin];if(!Number.isFinite(mm)||mm<4||mm>30)return null;}return p;};
 function pointsForFinger(h,i){return clonePoints(h.points[i]||suggestion(h,i));}
@@ -44,11 +45,12 @@ function sizeFor(mm){
 function displaySize(mm){if(mm===null)return '—';const s=sizeFor(mm);return s===null?'範囲外':`${s}号${state.chart.isExample?'（仮）':''}`;}
 function updateStage(){
   const photo=current().photo,cal=current().calibration;
-  const stage=!photo?0:!cal?1:state.mode==='coin'?1:state.widths[state.hand].every(x=>x!==null)?3:2;
+  const stage=state.liveGuideOpen?(liveGuide?.stage==='coin'?1:2):!photo?0:!cal?1:state.mode==='coin'?1:state.widths[state.hand].every(x=>x!==null)?3:2;
   document.querySelectorAll('.step').forEach((el,i)=>{el.classList.toggle('active',i===stage);el.classList.toggle('done',i<stage);});
-  $('photoEmpty').classList.toggle('hidden',!!photo||state.cameraOpen);
-  $('photoEditor').classList.toggle('hidden',!photo||state.cameraOpen);
-  $('cameraView').classList.toggle('hidden',!state.cameraOpen);
+  $('photoEmpty').classList.toggle('hidden',!!photo||state.cameraOpen||state.liveGuideOpen);
+  $('photoEditor').classList.toggle('hidden',!photo||state.cameraOpen||state.liveGuideOpen);
+  $('cameraView').classList.toggle('hidden',!state.cameraOpen||state.liveGuideOpen);
+  $('liveGuideView').classList.toggle('hidden',!state.liveGuideOpen);
   const doingCoin=state.mode==='coin';
   $('coinAssistBtn').classList.toggle('hidden',!doingCoin||!photo);
   $('coinAssistBtn').textContent=state.coinCenterPick?'位置指定をキャンセル':'硬貨の中心をタップして補正';
@@ -98,14 +100,14 @@ function refresh(){
 function selectHand(hand){
   if(hand===state.hand)return;
   autoScanSerial++;
-  stopCamera();state.hand=hand;state.coinCenterPick=false;state.mode=current().calibration?'nail':'coin';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),state.finger);resetView();status('');refresh();
+  stopCamera();state.hand=hand;if(state.liveGuideOpen)liveGuide?.resetCoin();state.coinCenterPick=false;state.mode=current().calibration?'nail':'coin';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),state.finger);resetView();status('');refresh();
 }
 function chooseFinger(i){
   state.finger=i;state.coinCenterPick=false;if(current().calibration)state.mode='nail';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),i);status('');refresh();
 }
 function resetView(){state.zoom=1;state.panX=0;state.panY=0;$('zoomLabel').textContent='100%';requestDraw();}
 function handleCoinChange(value){
-  const h=current();h.coin=value;
+  const h=current();h.coin=value;if(state.liveGuideOpen)liveGuide?.resetCoin();
   if(h.calibration){h.points.forEach((p,i)=>{if(p&&p.length===2){state.widths[state.hand][i]=Math.round(mmFromPoints(p)*10)/10;}});storeWidths();}
   refresh();
 }
@@ -122,6 +124,34 @@ async function acceptFile(e){const file=e.target.files?.[0];e.target.value='';if
 async function stopCamera(){
   if(state.stream){state.stream.getTracks().forEach(t=>t.stop());state.stream=null;}
   $('cameraVideo').srcObject=null;state.cameraOpen=false;updateStage();
+}
+function stopLiveGuide(){
+  if(liveGuide)liveGuide.stop(false);
+  state.liveGuideOpen=false;
+  status('');
+  refresh();
+}
+async function openLiveGuide(){
+  if(!window.NailMiiLiveGuide){status('ガイド用のプログラムを読み込めませんでした。写真計測をお使いください。');return;}
+  if(!liveGuide)liveGuide=new window.NailMiiLiveGuide({
+    getCoin:()=>current().coin,
+    getFinger:()=>state.finger,
+    getHand:()=>state.hand,
+    onSave:({mm,hand,finger})=>{
+      if(!state.liveGuideOpen||hand!==state.hand||!Number.isFinite(mm))return false;
+      const rounded=Math.round(mm*10)/10;
+      state.widths[hand][finger]=rounded;storeWidths();
+      const next=state.widths[hand].findIndex(x=>x===null);
+      if(next<0){stopLiveGuide();toast('この手の5本を保存しました。反対の手も測れます。');return true;}
+      state.finger=next;
+      refresh();toast(FINGERS[next]+'を中央に合わせてください。');
+      return true;
+    }
+  });
+  await stopCamera();
+  state.liveGuideOpen=true;refresh();
+  try{await liveGuide.start();refresh();}
+  catch(err){console.warn('Live guide camera failed',err);stopLiveGuide();status('ライブガイドのカメラを起動できませんでした。カメラ権限をご確認いただくか、写真撮影モードをお使いください。');}
 }
 async function openCamera(){
   if(!navigator.mediaDevices?.getUserMedia){status('このブラウザではカメラを直接起動できません。下の「写真を選ぶ」からカメラ撮影または写真の選択をしてください。');$('photoInput').click();return;}
@@ -296,7 +326,7 @@ function clearResults(){if(!confirm('左右10本の計測データを削除し�
 function init(){
   document.querySelectorAll('[data-hand]').forEach(b=>b.addEventListener('click',()=>selectHand(b.dataset.hand)));
   $('coinType').addEventListener('change',e=>handleCoinChange(e.target.value));
-  $('startCameraBtn').addEventListener('click',openCamera);$('cameraStopBtn').addEventListener('click',stopCamera);$('switchCameraBtn').addEventListener('click',()=>{state.facing=state.facing==='environment'?'user':'environment';openCamera();});$('captureBtn').addEventListener('click',capture);
+  $('startCameraBtn').addEventListener('click',openLiveGuide);$('startLegacyCameraBtn').addEventListener('click',openCamera);$('cameraStopBtn').addEventListener('click',stopCamera);$('switchCameraBtn').addEventListener('click',()=>{state.facing=state.facing==='environment'?'user':'environment';openCamera();});$('captureBtn').addEventListener('click',capture);
   for(const id of ['photoInput','photoReplaceInput'])$(id).addEventListener('change',acceptFile);
   $('retakeBtn').addEventListener('click',openCamera);
   $('zoomOutBtn').addEventListener('click',()=>zoom(1/1.45));$('zoomInBtn').addEventListener('click',()=>zoom(1.45));$('zoomResetBtn').addEventListener('click',resetView);
@@ -314,7 +344,10 @@ function init(){
   });
   $('shareBtn').addEventListener('click',shareApp);$('exportImageBtn').addEventListener('click',downloadResultsImage);$('copyResultsBtn').addEventListener('click',copyResults);$('clearResultsBtn').addEventListener('click',clearResults);
   $('saveChartBtn').addEventListener('click',saveChart);$('resetChartBtn').addEventListener('click',resetChart);
-  document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.stream)stopCamera();});
+  document.addEventListener('nailmii:close-guide',stopLiveGuide);
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){if(state.stream)stopCamera();if(state.liveGuideOpen)stopLiveGuide();}
+  });
   editChartRows();refresh();
   if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
 }
