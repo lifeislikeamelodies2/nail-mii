@@ -20,7 +20,7 @@
     return { width: canvas.width, height: canvas.height, pixels: data.data, scale };
   }
 
-  function circleCandidates(preview) {
+  function circleCandidates(preview, preferredCenter) {
     const { width: w, height: h, pixels } = preview;
     const n = w * h, gray = new Float32Array(n), gx = new Float32Array(n),
       gy = new Float32Array(n), grad = new Float32Array(n);
@@ -79,6 +79,15 @@
       if (bestCenters.every(c => Math.hypot(c.x - candidate.x, c.y - candidate.y) > 9)) bestCenters.push(candidate);
       if (bestCenters.length >= 22) break;
     }
+    // A center indicated by the user is a strong spatial prior. Include nearby
+    // centers even if an embossed pattern received more edge votes.
+    if (preferredCenter) {
+      const a = preferredCenter;
+      for (const [dx, dy] of [[0,0],[4,0],[-4,0],[0,4],[0,-4],[8,0],[-8,0],[0,8],[0,-8],[6,6],[-6,6],[6,-6],[-6,-6]]) {
+        const x = Math.round(a.x + dx), y = Math.round(a.y + dy);
+        if(x>minR && y>minR && x<w-minR && y<h-minR) bestCenters.push({x,y,votes:0});
+      }
+    }
     const angles = Array.from({ length: 96 }, (_, i) => i * 2 * Math.PI / 96);
     const cos = angles.map(Math.cos), sin = angles.map(Math.sin);
     const results = [];
@@ -103,17 +112,70 @@
     return results;
   }
 
-  function detectCoin(photo) {
-    const src = photoData(photo, 540), circles = circleCandidates(src);
-    const best = circles.find(c => c.cover >= .52 && c.score >= .54 && c.r >= 11);
-    if (!best) return null;
-    // Circle is symmetric; a horizontal diameter avoids diagonal placement uncertainty.
-    const cx = best.x / src.scale, cy = best.y / src.scale, r = best.r / src.scale;
-    return {
-      points: [{ x: cx - r, y: cy }, { x: cx + r, y: cy }],
-      circle: { x: cx, y: cy, r },
-      confidence: best.score,
-      note: '硬貨の輪郭を推定しました。円と硬貨の縁が一致するか確認してください。'
+
+  // A round patch of fabric can obtain many Hough votes. A coin, unlike a
+  // crease or isolated pattern, has a fairly consistent inside/outside
+  // brightness difference around most of its entire circumference.
+  function coinAppearance(preview, circle) {
+    const { width:w, height:h, pixels }=preview;
+    const luminance=(x,y)=>{
+      x=Math.round(x);y=Math.round(y);
+      if(x<1||y<1||x>=w-1||y>=h-1)return null;
+      const i=(y*w+x)*4;
+      return .299*pixels[i]+.587*pixels[i+1]+.114*pixels[i+2];
+    };
+    let sum=0, positive=0, negative=0, samples=0;
+    for(let i=0;i<96;i++){
+      const a=2*Math.PI*i/96,ux=Math.cos(a),uy=Math.sin(a);
+      const sample=(radius)=>luminance(circle.x+ux*radius,circle.y+uy*radius);
+      const i1=sample(circle.r*.65),i2=sample(circle.r*.81);
+      const o1=sample(circle.r*1.13),o2=sample(circle.r*1.20);
+      if(i1===null||i2===null||o1===null||o2===null)continue;
+      const delta=(o1+o2-i1-i2)/2;
+      sum+=delta;samples++;
+      if(delta>8)positive++;
+      else if(delta< -8)negative++;
+    }
+    if(samples<80)return null;
+    const lightCoin=negative>positive;
+    const support=Math.max(positive,negative)/samples;
+    const conflict=Math.min(positive,negative)/samples;
+    const contrast=Math.abs(sum)/samples;
+    // Require an actual disc, not just a locally circular edge.
+    if(support<.53||conflict>.23||contrast<12.5)return null;
+    return {support, conflict, contrast,
+      // Contrast / ring completeness / circular edge support.
+      score:circle.score*.36+circle.cover*.12+support*.32+
+        Math.min(contrast/85,1)*.15+Math.min(circle.r/85,1)*.05};
+  }
+
+  function detectCoin(photo, centerHint) {
+    const src=photoData(photo,540);
+    const target=centerHint?{x:centerHint.x*src.scale,y:centerHint.y*src.scale}:null;
+    const circles=circleCandidates(src,target);
+    const validated=[];
+    for (const c of circles) {
+      if(c.cover<.48||c.score<.45||c.r<Math.min(src.width,src.height)*.038)continue;
+      if(target){
+        const centerError=Math.hypot(c.x-target.x,c.y-target.y);
+        if(centerError>Math.max(10,c.r*.52))continue;
+      }
+      const appearance=coinAppearance(src,c);
+      if(!appearance)continue;
+      const centerError=target?Math.hypot(c.x-target.x,c.y-target.y):0;
+      const score=appearance.score+(target?.12*Math.max(0,1-centerError/(c.r*.55)):0);
+      validated.push({ ...c, appearance, rank:score });
+    }
+    validated.sort((a,b)=>b.rank-a.rank);
+    const best=validated[0];
+    // Low-confidence or ambiguous imagery must never silently set calibration.
+    if(!best||best.rank<(target?.51:.53))return null;
+    const cx=best.x/src.scale,cy=best.y/src.scale,r=best.r/src.scale;
+    return{
+      points:[{x:cx-r,y:cy},{x:cx+r,y:cy}],
+      circle:{x:cx,y:cy,r},
+      confidence:Math.min(.98,best.rank),
+      note:'硬貨の外周から円を推定しました。外側の縁に一致するか確認してください。'
     };
   }
 
