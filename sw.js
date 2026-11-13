@@ -1,4 +1,4 @@
-const CACHE='nail-mii-v3';
+const CACHE='nail-mii-v4';
 const STATIC=['./','./index.html','./styles.css','./app.js','./vision.js','./live-guide.js','./icon.svg','./manifest.webmanifest'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(STATIC)));self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))));self.clients.claim();});
