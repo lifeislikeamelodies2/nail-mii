@@ -23,7 +23,7 @@ function readChart(){
 const state={
   hand:'left',finger:0,mode:'coin',widths:readWidths(),chart:readChart(),
   hands:{left:{photo:null,coin:'10',calibration:null,points:Array(5).fill(null)},right:{photo:null,coin:'10',calibration:null,points:Array(5).fill(null)}},
-  draft:[],zoom:1,panX:0,panY:0,gesture:null,coinCenterPick:false,liveGuideOpen:false,
+  draft:[],zoom:1,panX:0,panY:0,gesture:null,coinCenterPick:false,liveGuideOpen:false,lastCaptureMode:'paired',
   stream:null,facing:'environment',cameraOpen:false
 };
 const current=()=>state.hands[state.hand];
@@ -117,7 +117,7 @@ async function normalizeFile(file){
   finally{URL.revokeObjectURL(url);}
 }
 function usePhoto(canvas,singleShot=null){
-  stopCamera();autoScanSerial++;state.coinCenterPick=false;state.liveGuideOpen=false;
+  stopCamera();autoScanSerial++;state.coinCenterPick=false;state.liveGuideOpen=false;state.lastCaptureMode=singleShot?'paired':'photo';
   const h=current();h.photo=canvas;h.calibration=null;h.points=Array(5).fill(null);h.autoNails=Array(5).fill(null);
   if(singleShot?.nailPoints?.length===2){
     h.autoNails[state.finger]={points:clonePoints(singleShot.nailPoints),source:'side-by-side-single-shot'};
@@ -335,7 +335,7 @@ function init(){
   $('coinType').addEventListener('change',e=>handleCoinChange(e.target.value));
   $('startCameraBtn').addEventListener('click',openLiveGuide);$('startLegacyCameraBtn').addEventListener('click',openCamera);$('cameraStopBtn').addEventListener('click',stopCamera);$('switchCameraBtn').addEventListener('click',()=>{state.facing=state.facing==='environment'?'user':'environment';openCamera();});$('captureBtn').addEventListener('click',capture);
   for(const id of ['photoInput','photoReplaceInput'])$(id).addEventListener('change',acceptFile);
-  $('retakeBtn').addEventListener('click',openCamera);
+  $('retakeBtn').addEventListener('click',()=>state.lastCaptureMode==='paired'?openLiveGuide():openCamera());
   $('zoomOutBtn').addEventListener('click',()=>zoom(1/1.45));$('zoomInBtn').addEventListener('click',()=>zoom(1.45));$('zoomResetBtn').addEventListener('click',resetView);
   const canvas=$('editorCanvas');canvas.addEventListener('pointerdown',canvasPointerDown);canvas.addEventListener('pointermove',canvasPointerMove);canvas.addEventListener('pointerup',canvasPointerUp);canvas.addEventListener('pointercancel',canvasPointerUp);window.addEventListener('resize',requestDraw);
   $('resetPointsBtn').addEventListener('click',resetPoints);$('confirmPointsBtn').addEventListener('click',confirmPoints);
