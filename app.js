@@ -45,7 +45,7 @@ function sizeFor(mm){
 function displaySize(mm){if(mm===null)return '—';const s=sizeFor(mm);return s===null?'範囲外':`${s}号${state.chart.isExample?'（仮）':''}`;}
 function updateStage(){
   const photo=current().photo,cal=current().calibration;
-  const stage=state.liveGuideOpen?(liveGuide?.stage==='coin'?1:2):!photo?0:!cal?1:state.mode==='coin'?1:state.widths[state.hand].every(x=>x!==null)?3:2;
+  const stage=state.liveGuideOpen?0:!photo?0:!cal?1:state.mode==='coin'?1:state.widths[state.hand].every(x=>x!==null)?3:2;
   document.querySelectorAll('.step').forEach((el,i)=>{el.classList.toggle('active',i===stage);el.classList.toggle('done',i<stage);});
   $('photoEmpty').classList.toggle('hidden',!!photo||state.cameraOpen||state.liveGuideOpen);
   $('photoEditor').classList.toggle('hidden',!photo||state.cameraOpen||state.liveGuideOpen);
@@ -116,9 +116,24 @@ async function normalizeFile(file){
   try{const img=new Image();img.src=url;await img.decode();const max=2400,ratio=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*ratio));c.height=Math.max(1,Math.round(img.naturalHeight*ratio));c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c;}
   finally{URL.revokeObjectURL(url);}
 }
-function usePhoto(canvas){
-  stopCamera();autoScanSerial++;state.coinCenterPick=false;const h=current();h.photo=canvas;h.calibration=null;h.points=Array(5).fill(null);h.autoNails=Array(5).fill(null);state.mode='coin';state.draft=[];resetView();status('');refresh();toast('写真を読み込みました。自動認識を試します。');
-  autoScanPhoto();
+function usePhoto(canvas,singleShot=null){
+  stopCamera();autoScanSerial++;state.coinCenterPick=false;state.liveGuideOpen=false;
+  const h=current();h.photo=canvas;h.calibration=null;h.points=Array(5).fill(null);h.autoNails=Array(5).fill(null);
+  if(singleShot?.nailPoints?.length===2){
+    h.autoNails[state.finger]={points:clonePoints(singleShot.nailPoints),source:'side-by-side-single-shot'};
+  }
+  state.mode='coin';state.draft=singleShot?.coinPoints?.length===2?clonePoints(singleShot.coinPoints):[];
+  resetView();status('');refresh();
+  if(singleShot){
+    const coinFound=state.draft.length===2,nailFound=!!h.autoNails[state.finger];
+    status(coinFound
+      ?'左右ガイドの同時撮影が完了しました。まず硬貨の円が外周に合っているか確認し、確定してください。'+(nailFound?'爪の候補も検出しました。':'爪の候補は手動で指定してください。')
+      :'硬貨の円を確実に検出できませんでした。写真上で硬貨の左端と右端を指定してください。');
+    toast('1枚の写真を解析しました。計測線を確認してください。');
+  }else{
+    toast('写真を読み込みました。自動認識を試します。');
+    autoScanPhoto();
+  }
 }
 async function acceptFile(e){const file=e.target.files?.[0];e.target.value='';if(!file)return;if(!file.type.startsWith('image/')){toast('画像ファイルを選択してください');return;}try{usePhoto(await normalizeFile(file));}catch(err){console.error(err);status('画像を読み込めませんでした。別の写真をお試しください。');}}
 async function stopCamera(){
@@ -132,26 +147,18 @@ function stopLiveGuide(){
   refresh();
 }
 async function openLiveGuide(){
-  if(!window.NailMiiLiveGuide){status('ガイド用のプログラムを読み込めませんでした。写真計測をお使いください。');return;}
-  if(!liveGuide)liveGuide=new window.NailMiiLiveGuide({
+  if(!window.NailMiiPairedGuide){status('同時撮影のプログラムを読み込めませんでした。写真計測をお使いください。');return;}
+  if(!liveGuide)liveGuide=new window.NailMiiPairedGuide({
     getCoin:()=>current().coin,
-    getFinger:()=>state.finger,
-    getHand:()=>state.hand,
-    onSave:({mm,hand,finger})=>{
-      if(!state.liveGuideOpen||hand!==state.hand||!Number.isFinite(mm))return false;
-      const rounded=Math.round(mm*10)/10;
-      state.widths[hand][finger]=rounded;storeWidths();
-      const next=state.widths[hand].findIndex(x=>x===null);
-      if(next<0){stopLiveGuide();toast('この手の5本を保存しました。反対の手も測れます。');return true;}
-      state.finger=next;
-      refresh();toast(FINGERS[next]+'を中央に合わせてください。');
-      return true;
+    onCapture:(canvas,candidates)=>{
+      state.liveGuideOpen=false;
+      usePhoto(canvas,candidates);
     }
   });
   await stopCamera();
   state.liveGuideOpen=true;refresh();
   try{await liveGuide.start();refresh();}
-  catch(err){console.warn('Live guide camera failed',err);stopLiveGuide();status('ライブガイドのカメラを起動できませんでした。カメラ権限をご確認いただくか、写真撮影モードをお使いください。');}
+  catch(err){console.warn('Paired camera failed',err);stopLiveGuide();status('同時撮影カメラを起動できませんでした。カメラの許可をご確認いただくか、写真撮影モードをお使いください。');}
 }
 async function openCamera(){
   if(!navigator.mediaDevices?.getUserMedia){status('このブラウザではカメラを直接起動できません。下の「写真を選ぶ」からカメラ撮影または写真の選択をしてください。');$('photoInput').click();return;}
