@@ -98,7 +98,7 @@ class NailMiiLiveGuide {
   constructor({onSave,getCoin,getFinger,getHand}){
     this.onSave=onSave;this.getCoin=getCoin;this.getFinger=getFinger;this.getHand=getHand;
     this.video=$('liveVideo');this.canvas=$('liveOverlay');this.ctx=this.canvas.getContext('2d');
-    this.stage='coin';this.running=false;this.stream=null;
+    this.stage='coin';this.running=false;this.stream=null;this.startTicket=0;
     this.raf=0;this.lastFrame=0;this.samples=[];this.result=null;
     this.calibration=null;this.lastLabel='';
     this.offscreen=document.createElement('canvas');
@@ -124,20 +124,24 @@ class NailMiiLiveGuide {
   }
   async start(){
     if(this.running)return;
+    const ticket=++this.startTicket;
     if(!navigator.mediaDevices?.getUserMedia)throw Error('このブラウザではカメラに対応していません。');
     this.stage='coin';this.calibration=null;this.samples=[];this.result=null;
     this.updateButtons();
     const stream=await navigator.mediaDevices.getUserMedia({
       audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960}}
     });
+    if(ticket!==this.startTicket){stream.getTracks().forEach(t=>t.stop());return;}
     this.stream=stream;
     this.video.srcObject=stream;
     try{await this.video.play();}catch(err){stream.getTracks().forEach(t=>t.stop());this.stream=null;throw err;}
+    if(ticket!==this.startTicket){stream.getTracks().forEach(t=>t.stop());return;}
     this.running=true;this.lastFrame=0;
     this.label('円の中に硬貨を合わせてください。端末を真上から向け、距離を固定します。');
     this.raf=requestAnimationFrame(t=>this.frame(t));
   }
   stop(notify){
+    this.startTicket++;
     cancelAnimationFrame(this.raf);
     this.running=false;this.samples=[];this.result=null;
     if(this.stream){this.stream.getTracks().forEach(t=>t.stop());this.stream=null;}
@@ -190,6 +194,7 @@ class NailMiiLiveGuide {
     if(t-this.lastFrame<110)return;this.lastFrame=t;
     const rect=this.canvas.getBoundingClientRect();
     if(rect.width<1||rect.height<1)return;
+    if(this.calibration!==null&&this.guideSize()!==this.calibration){this.resetCoin();this.label('画面サイズが変わったため、硬貨で基準を取り直してください。');}
     const dpr=Math.min(2,window.devicePixelRatio||1),w=Math.round(rect.width),h=Math.round(rect.height);
     if(this.canvas.width!==Math.round(w*dpr)||this.canvas.height!==Math.round(h*dpr)){
       this.canvas.width=Math.round(w*dpr);this.canvas.height=Math.round(h*dpr);
