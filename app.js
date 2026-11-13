@@ -1,5 +1,5 @@
 'use strict';
-/* Nail Mii: entirely client-side photographic measurement, not AI segmentation. */
+/* Nail Mii: client-side photographic measurement with optional automatic edge proposals. */
 const COIN_MM = Object.freeze({ '10': 23.5, '100': 22.6 });
 const FINGERS = Object.freeze(['親指','人差し指','中指','薬指','小指']);
 const DEFAULT_SIZES = Object.freeze([18,17,16,15,14,13,12,11,10,9]);
@@ -27,6 +27,9 @@ const state={
   stream:null,facing:'environment',cameraOpen:false
 };
 const current=()=>state.hands[state.hand];
+let autoScanSerial=0;
+const suggestion=(h,i)=>{const p=h.autoNails?.[i]?.points; if(!p||p.length!==2)return null; const c=h.calibration; if(c){const d=dist(...c),mm=dist(...p)/d*COIN_MM[h.coin];if(!Number.isFinite(mm)||mm<4||mm>30)return null;}return p;};
+function pointsForFinger(h,i){return clonePoints(h.points[i]||suggestion(h,i));}
 let toastTimer;
 function toast(message){const el=$('toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),3400);}
 function status(message){const el=$('statusMessage'); if(!message){el.classList.add('hidden');return;}el.textContent=message;el.classList.remove('hidden');}
@@ -48,7 +51,7 @@ function updateStage(){
   $('cameraView').classList.toggle('hidden',!state.cameraOpen);
   const doingCoin=state.mode==='coin';
   $('canvasMode').textContent=doingCoin?'硬貨の直径を測る':`${FINGERS[state.finger]}の幅を測る`;
-  $('canvasInstructions').textContent=doingCoin?'硬貨の外周で直径になる2点を順にタップ。2点はドラッグで微調整できます。':'爪の最も広い場所の左右端を順にタップ。爪の皮膚との境目ではなく、爪そのものの幅を測ります。';
+  $('canvasInstructions').textContent=doingCoin?'自動推定された円の位置を確認。誤認識時は硬貨の直径になる2点をタップし、ドラッグで補正してください。':'自動推定された爪の左右端を確認。位置がずれているときはドラッグで調整し、検出できないときは2点を手動で指定してください。';
   $('sideTitle').textContent=doingCoin?'コインの外周を選ぼう':`${FINGERS[state.finger]}の幅を測ろう`;
   $('sideDescription').textContent=doingCoin?'硬貨の中心を通る直径を測るため、外周の両端を指定してください。':'拡大して爪の左右端を正確にタップ。丸い計測点は指でドラッグして位置を調整できます。';
   $('sideHint').textContent=doingCoin?'10円玉は23.5mm、100円玉は22.6mm。実寸を使って爪の幅に換算します。':'測る幅は爪を真上から見た直線幅です。カーブに沿った幅とは異なります。';
@@ -92,10 +95,11 @@ function refresh(){
 }
 function selectHand(hand){
   if(hand===state.hand)return;
-  stopCamera();state.hand=hand;state.mode=current().calibration?'nail':'coin';state.draft=clonePoints(state.mode==='coin'?current().calibration:current().points[state.finger]);resetView();status('');refresh();
+  autoScanSerial++;
+  stopCamera();state.hand=hand;state.mode=current().calibration?'nail':'coin';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),state.finger);resetView();status('');refresh();
 }
 function chooseFinger(i){
-  state.finger=i;if(current().calibration)state.mode='nail';state.draft=clonePoints(state.mode==='coin'?current().calibration:current().points[i]);status('');refresh();
+  state.finger=i;if(current().calibration)state.mode='nail';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),i);status('');refresh();
 }
 function resetView(){state.zoom=1;state.panX=0;state.panY=0;$('zoomLabel').textContent='100%';requestDraw();}
 function handleCoinChange(value){
@@ -109,7 +113,8 @@ async function normalizeFile(file){
   finally{URL.revokeObjectURL(url);}
 }
 function usePhoto(canvas){
-  stopCamera();const h=current();h.photo=canvas;h.calibration=null;h.points=Array(5).fill(null);state.mode='coin';state.draft=[];resetView();status('');refresh();toast('写真を読み込みました。硬貨の両端を選んでください。');
+  stopCamera();autoScanSerial++;const h=current();h.photo=canvas;h.calibration=null;h.points=Array(5).fill(null);h.autoNails=Array(5).fill(null);state.mode='coin';state.draft=[];resetView();status('');refresh();toast('写真を読み込みました。自動認識を試します。');
+  autoScanPhoto();
 }
 async function acceptFile(e){const file=e.target.files?.[0];e.target.value='';if(!file)return;if(!file.type.startsWith('image/')){toast('画像ファイルを選択してください');return;}try{usePhoto(await normalizeFile(file));}catch(err){console.error(err);status('画像を読み込めませんでした。別の写真をお試しください。');}}
 async function stopCamera(){
@@ -181,19 +186,49 @@ function zoom(multiplier){
   }
   state.zoom=next;$('zoomLabel').textContent=`${Math.round(next*100)}%`;requestDraw();
 }
+async function autoScanPhoto(){
+  const vision=window.NailMiiVision,h=current(),photo=h.photo,hand=state.hand,ticket=++autoScanSerial;
+  if(!photo||!vision){status('自動認識機能を読み込めませんでした。手動で2点を指定してください。');return;}
+  const stillCurrent=()=>ticket===autoScanSerial && current()===h && h.photo===photo && state.hand===hand;
+  const button=$('autoDetectBtn');button.disabled=true;button.textContent='認識しています…';status('写真を解析しています。指先の認識モデルは初回のみ読み込みに時間がかかります。');
+  try{
+    await new Promise(resolve=>setTimeout(resolve,50));
+    const proposal=!h.calibration ? vision.detectCoin(photo):null;
+    if(!stillCurrent())return;
+    if(proposal && !h.calibration && state.mode==='coin' && state.draft.length===0){
+      state.draft=clonePoints(proposal.points);updateStage();requestDraw();
+      status('硬貨の輪郭を自動推定しました。円が外周と一致するか確認して「硬貨の直径を確定」を押してください。');
+    } else if(!h.calibration && state.mode==='coin' && state.draft.length===0){
+      status('硬貨の輪郭を確実に検出できませんでした。写真上の硬貨の両端を手動で選択してください。');
+    }
+    try{
+      const calibrated=h.calibration||proposal?.points||null;
+      const result=await vision.detectNails(photo,calibrated,COIN_MM[h.coin]);
+      if(!stillCurrent())return;
+      h.autoNails=result.nails||Array(5).fill(null);
+      const count=h.autoNails.filter(Boolean).length;
+      if(state.mode==='nail' && !h.points[state.finger] && state.draft.length===0){state.draft=pointsForFinger(h,state.finger);refresh();}
+      if(state.mode==='coin' && state.draft.length===2){status('硬貨の円と外周を確認して確定してください。爪の候補は'+count+'本見つかりました（読み取り結果は要確認）。');}
+      else if(state.mode==='nail' && count){status(count+'本の爪の左右端を推定しました。選んだ指の計測点を確認し、必要ならドラッグで補正してください。');}
+      else if(!result.foundHand){status('手全体を認識できませんでした。硬貨を確認後、指の爪の左右端を手動で指定してください。');}
+      else if(!count){status('爪の境界が不明瞭でした。爪の両端は手動で指定してください。');}
+    }catch(error){console.warn('Hand model unavailable',error);if(stillCurrent()){status('指先の自動認識が利用できません。硬貨の確認後、爪の両端を手動で指定してください。');}}
+  }catch(error){console.warn('Automatic image measurement failed',error);if(stillCurrent())status('自動認識に失敗しました。写真を確認して、2点を手動で指定してください。');}
+  finally{if(stillCurrent()){button.disabled=false;button.textContent='自動認識をやり直す';refresh();}}
+}
 function confirmPoints(){
   if(state.draft.length!==2)return;
   const len=dist(...state.draft);if(len<3){toast('2点が近すぎます。もう少し離して指定してください。');return;}
   const h=current();
   if(state.mode==='coin'){
     if(len<14){toast('硬貨が小さく写っています。拡大できる写真を使うことをおすすめします。');}
-    h.calibration=clonePoints(state.draft);state.mode='nail';state.draft=clonePoints(h.points[state.finger]);toast('硬貨の基準を設定しました。次は爪の左右端を指定してください。');
+    h.calibration=clonePoints(state.draft);state.mode='nail';state.draft=pointsForFinger(h,state.finger);toast(state.draft.length===2?'硬貨の基準を設定しました。爪の自動候補を確認してください。':'硬貨の基準を設定しました。次は爪の左右端を指定してください。');
   }else{
     const mm=mmFromPoints(state.draft);if(mm===null){toast('先に硬貨の直径を指定してください');return;}
     if(mm<4||mm>35){toast(`計測値は${mm.toFixed(1)}mmです。爪の横幅をもう一度確認してください。`);return;}
     h.points[state.finger]=clonePoints(state.draft);state.widths[state.hand][state.finger]=Math.round(mm*10)/10;storeWidths();
     const next=state.widths[state.hand].findIndex(x=>x===null);
-    if(next>=0){state.finger=next;state.draft=clonePoints(h.points[next]);toast(`${FINGERS.find((_,i)=>i===state.finger)??'次の指'}を続けて計測できます。`);}
+    if(next>=0){state.finger=next;state.draft=pointsForFinger(h,next);toast(`${FINGERS.find((_,i)=>i===state.finger)??'次の指'}を続けて計測できます。`);}
     else{state.draft=[];toast('この手の5本を計測しました。反対の手も測れます。');}
   }
   refresh();
@@ -248,7 +283,7 @@ function init(){
   $('retakeBtn').addEventListener('click',openCamera);
   $('zoomOutBtn').addEventListener('click',()=>zoom(1/1.45));$('zoomInBtn').addEventListener('click',()=>zoom(1.45));$('zoomResetBtn').addEventListener('click',resetView);
   const canvas=$('editorCanvas');canvas.addEventListener('pointerdown',canvasPointerDown);canvas.addEventListener('pointermove',canvasPointerMove);canvas.addEventListener('pointerup',canvasPointerUp);canvas.addEventListener('pointercancel',canvasPointerUp);window.addEventListener('resize',requestDraw);
-  $('resetPointsBtn').addEventListener('click',resetPoints);$('confirmPointsBtn').addEventListener('click',confirmPoints);
+  $('resetPointsBtn').addEventListener('click',resetPoints);$('confirmPointsBtn').addEventListener('click',confirmPoints);$('autoDetectBtn').addEventListener('click',autoScanPhoto);
   $('shareBtn').addEventListener('click',shareApp);$('exportImageBtn').addEventListener('click',downloadResultsImage);$('copyResultsBtn').addEventListener('click',copyResults);$('clearResultsBtn').addEventListener('click',clearResults);
   $('saveChartBtn').addEventListener('click',saveChart);$('resetChartBtn').addEventListener('click',resetChart);
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.stream)stopCamera();});
