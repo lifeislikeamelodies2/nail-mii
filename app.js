@@ -23,7 +23,7 @@ function readChart(){
 const state={
   hand:'left',finger:0,mode:'coin',widths:readWidths(),chart:readChart(),
   hands:{left:{photo:null,coin:'10',calibration:null,points:Array(5).fill(null)},right:{photo:null,coin:'10',calibration:null,points:Array(5).fill(null)}},
-  draft:[],zoom:1,panX:0,panY:0,gesture:null,
+  draft:[],zoom:1,panX:0,panY:0,gesture:null,coinCenterPick:false,
   stream:null,facing:'environment',cameraOpen:false
 };
 const current=()=>state.hands[state.hand];
@@ -50,6 +50,8 @@ function updateStage(){
   $('photoEditor').classList.toggle('hidden',!photo||state.cameraOpen);
   $('cameraView').classList.toggle('hidden',!state.cameraOpen);
   const doingCoin=state.mode==='coin';
+  $('coinAssistBtn').classList.toggle('hidden',!doingCoin||!photo);
+  $('coinAssistBtn').textContent=state.coinCenterPick?'位置指定をキャンセル':'硬貨の中心をタップして補正';
   $('canvasMode').textContent=doingCoin?'硬貨の直径を測る':`${FINGERS[state.finger]}の幅を測る`;
   $('canvasInstructions').textContent=doingCoin?'自動推定された円の位置を確認。誤認識時は硬貨の直径になる2点をタップし、ドラッグで補正してください。':'自動推定された爪の左右端を確認。位置がずれているときはドラッグで調整し、検出できないときは2点を手動で指定してください。';
   $('sideTitle').textContent=doingCoin?'コインの外周を選ぼう':`${FINGERS[state.finger]}の幅を測ろう`;
@@ -96,10 +98,10 @@ function refresh(){
 function selectHand(hand){
   if(hand===state.hand)return;
   autoScanSerial++;
-  stopCamera();state.hand=hand;state.mode=current().calibration?'nail':'coin';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),state.finger);resetView();status('');refresh();
+  stopCamera();state.hand=hand;state.coinCenterPick=false;state.mode=current().calibration?'nail':'coin';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),state.finger);resetView();status('');refresh();
 }
 function chooseFinger(i){
-  state.finger=i;if(current().calibration)state.mode='nail';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),i);status('');refresh();
+  state.finger=i;state.coinCenterPick=false;if(current().calibration)state.mode='nail';state.draft=state.mode==='coin'?clonePoints(current().calibration):pointsForFinger(current(),i);status('');refresh();
 }
 function resetView(){state.zoom=1;state.panX=0;state.panY=0;$('zoomLabel').textContent='100%';requestDraw();}
 function handleCoinChange(value){
@@ -113,7 +115,7 @@ async function normalizeFile(file){
   finally{URL.revokeObjectURL(url);}
 }
 function usePhoto(canvas){
-  stopCamera();autoScanSerial++;const h=current();h.photo=canvas;h.calibration=null;h.points=Array(5).fill(null);h.autoNails=Array(5).fill(null);state.mode='coin';state.draft=[];resetView();status('');refresh();toast('写真を読み込みました。自動認識を試します。');
+  stopCamera();autoScanSerial++;state.coinCenterPick=false;const h=current();h.photo=canvas;h.calibration=null;h.points=Array(5).fill(null);h.autoNails=Array(5).fill(null);state.mode='coin';state.draft=[];resetView();status('');refresh();toast('写真を読み込みました。自動認識を試します。');
   autoScanPhoto();
 }
 async function acceptFile(e){const file=e.target.files?.[0];e.target.value='';if(!file)return;if(!file.type.startsWith('image/')){toast('画像ファイルを選択してください');return;}try{usePhoto(await normalizeFile(file));}catch(err){console.error(err);status('画像を読み込めませんでした。別の写真をお試しください。');}}
@@ -160,7 +162,23 @@ function drawPair(ctx,points,color,handles){
 function eventPos(e){const r=$('editorCanvas').getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
 function canvasPointerDown(e){
   if(!current().photo||e.button>0)return;
-  e.preventDefault();const pos=eventPos(e);let marker=-1,nearest=Infinity;
+  e.preventDefault();const pos=eventPos(e);
+  if(state.coinCenterPick && state.mode==='coin'){
+    state.coinCenterPick=false;autoScanSerial++;
+    const hint=fromCanvas(pos.x,pos.y);
+    const proposal=window.NailMiiVision?.detectCoin(current().photo,hint);
+    const button=$('autoDetectBtn');button.disabled=false;button.textContent='自動認識をやり直す';
+    if(proposal){
+      state.draft=clonePoints(proposal.points);
+      status('指定した硬貨の周囲から円を再検出しました。円が実際の外周に重なるか確認して確定してください。');
+    }else{
+      state.draft=[];
+      status('指定した位置でも円を正確に検出できませんでした。硬貨の左端と右端を手動指定してください。');
+    }
+    updateStage();requestDraw();
+    return;
+  }
+  let marker=-1,nearest=Infinity;
   state.draft.forEach((p,i)=>{const q=toCanvas(p),d=dist(q,pos);if(d<nearest&&d<30){nearest=d;marker=i;}});
   if(marker>=0)state.gesture={type:'marker',index:marker};
   else if(state.draft.length<2){state.draft.push(fromCanvas(pos.x,pos.y));state.gesture={type:'marker',index:state.draft.length-1};}
@@ -283,7 +301,17 @@ function init(){
   $('retakeBtn').addEventListener('click',openCamera);
   $('zoomOutBtn').addEventListener('click',()=>zoom(1/1.45));$('zoomInBtn').addEventListener('click',()=>zoom(1.45));$('zoomResetBtn').addEventListener('click',resetView);
   const canvas=$('editorCanvas');canvas.addEventListener('pointerdown',canvasPointerDown);canvas.addEventListener('pointermove',canvasPointerMove);canvas.addEventListener('pointerup',canvasPointerUp);canvas.addEventListener('pointercancel',canvasPointerUp);window.addEventListener('resize',requestDraw);
-  $('resetPointsBtn').addEventListener('click',resetPoints);$('confirmPointsBtn').addEventListener('click',confirmPoints);$('autoDetectBtn').addEventListener('click',autoScanPhoto);
+  $('resetPointsBtn').addEventListener('click',resetPoints);$('confirmPointsBtn').addEventListener('click',confirmPoints);
+  $('autoDetectBtn').addEventListener('click',()=>{
+    state.coinCenterPick=false;
+    if(state.mode==='coin'&&!current().calibration)state.draft=[];
+    autoScanPhoto();
+  });
+  $('coinAssistBtn').addEventListener('click',()=>{
+    state.coinCenterPick=!state.coinCenterPick;
+    status(state.coinCenterPick?'写真の硬貨の中心付近を1回タップしてください。周辺だけで円の検出を試します。':'硬貨の左右端を指定してください。');
+    updateStage();
+  });
   $('shareBtn').addEventListener('click',shareApp);$('exportImageBtn').addEventListener('click',downloadResultsImage);$('copyResultsBtn').addEventListener('click',copyResults);$('clearResultsBtn').addEventListener('click',clearResults);
   $('saveChartBtn').addEventListener('click',saveChart);$('resetChartBtn').addEventListener('click',resetChart);
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.stream)stopCamera();});
