@@ -55,11 +55,15 @@ function findNail(image,centerX,centerY,guideDiameter,coinMm){
       // Texture, a single strong seam or one high-contrast edge is not a nail.
       if(smaller<10.5||balance<.44)continue;
       const mid=rgbAt(data,width,height,centerX+shift,centerY);
-      const middleLeft=rgbAt(data,width,height,centerX+shift-half*.48,centerY);
-      const middleRight=rgbAt(data,width,height,centerX+shift+half*.48,centerY);
+      // If the "inside" is partly skin rather than nail, the candidate often
+      // comes from the OUTER FINGER contour. Reject such pairs instead of
+      // inflating the nail width. Sample 78% of the candidate half-width.
+      const middleLeft=rgbAt(data,width,height,centerX+shift-half*.78,centerY);
+      const middleRight=rgbAt(data,width,height,centerX+shift+half*.78,centerY);
       const uniformity=(delta(mid,middleLeft)+delta(mid,middleRight))/2;
+      if(uniformity>15 && uniformity>smaller*.30)continue;
       const veryWidePenalty=half>guide*.35?2.5:0;
-      const score=smaller*(.6+.4*balance)-Math.max(0,uniformity-12)*.35-veryWidePenalty;
+      const score=smaller*(.6+.4*balance)-Math.max(0,uniformity-7)*1.25-veryWidePenalty;
       if(!best||score>best.score)best={x1:lx,x2:rx,y:centerY,score,widthPx:2*half,uniformity};
     }
   }
