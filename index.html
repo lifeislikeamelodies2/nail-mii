@@ -28,12 +28,28 @@
       <div class="hero-art" aria-hidden="true"><div class="hero-art-ribbon">measure your nails</div><div class="art-hand"><svg viewBox="0 0 260 295" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M81 263c-10-24-14-40-20-53-8-18-28-28-25-41 5-21 26-6 44 11-3-47-9-106-9-132 0-12 17-15 21-3 3 8 7 75 10 79L105 25c1-14 18-16 23-2 2 6 0 88 0 93l9-83c1-14 20-14 21 2 1 10-6 79-6 87l17-63c4-14 20-9 18 4l-9 92c16-20 30-23 38-15 8 9 2 23-12 44-14 19-27 35-30 57l-4 21" fill="#f6cabb" stroke="#ba827d" stroke-width="3" stroke-linejoin="round"/><path d="M71 52l21-1M105 35l21 0M136 46l20 3M170 70l16 3" stroke="#fff3e8" stroke-width="13" stroke-linecap="round"/><path d="M70 50l21-1M105 34l21 0M136 45l20 3M169 69l16 3" stroke="#d9969f" stroke-width="8" stroke-linecap="round"/><path d="M76 182c13 10 20 22 27 30" stroke="#d69c91" stroke-width="2" stroke-linecap="round"/></svg></div><div class="art-coin">10<span>円</span></div><div class="art-stars">✦</div><div class="art-label">NAIL SIZE CHECK <span>→</span></div></div>
     </section>
     <section id="measure" class="workspace" aria-labelledby="measure-title">
-      <div class="workspace-top"><div><p class="section-kicker">01 — NAIL SIZE MEASUREMENT</p><h2 id="measure-title">爪のサイズを測る</h2><p class="subtle">硬貨の円形と爪の端を自動推定し、写真上の爪幅をミリ単位で計測します。</p></div><button id="shareBtn" type="button" class="btn btn-ghost small">アプリをシェア ↗</button></div>
-      <div class="step-track" aria-label="計測の流れ"><div class="step active" data-stage="0"><span>1</span> 撮影</div><div class="step" data-stage="1"><span>2</span> 硬貨の計測</div><div class="step" data-stage="2"><span>3</span> 爪の計測</div><div class="step" data-stage="3"><span>4</span> サイズ確認</div></div>
+      <div class="workspace-top"><div><p class="section-kicker">01 — NAIL SIZE MEASUREMENT</p><h2 id="measure-title">爪のサイズを測る</h2><p class="subtle">硬貨を円形ガイドに合わせ、爪を中央の線に映すだけで幅の候補を表示します。写真で細かく補正する方法も選べます。</p></div><button id="shareBtn" type="button" class="btn btn-ghost small">アプリをシェア ↗</button></div>
+      <div class="step-track" aria-label="計測の流れ"><div class="step active" data-stage="0"><span>1</span> ガイドを表示</div><div class="step" data-stage="1"><span>2</span> 硬貨の計測</div><div class="step" data-stage="2"><span>3</span> 爪の計測</div><div class="step" data-stage="3"><span>4</span> サイズ確認</div></div>
       <div class="measurement-layout">
         <div class="measurement-main">
           <div class="photo-header"><div class="photo-header-group"><span class="field-label">計測する手</span><div class="toggle" role="group" aria-label="左右の手"><button type="button" class="toggle-btn selected" data-hand="left" aria-pressed="true">左手</button><button type="button" class="toggle-btn" data-hand="right" aria-pressed="false">右手</button></div></div><div class="photo-header-group"><label class="field-label" for="coinType">基準の硬貨</label><select id="coinType" class="select"><option value="10">10円玉（23.5mm）</option><option value="100">100円玉（22.6mm）</option></select></div></div>
-          <div id="photoEmpty" class="photo-empty"><div class="empty-illustration"><span>◯</span><span>✦</span></div><h3>まずは手と硬貨を撮影</h3><p>硬貨を爪の近くに置き、カメラを真上から向けてください。明るい場所で撮ると境界が見やすくなります。</p><button id="startCameraBtn" type="button" class="btn btn-primary">カメラを起動 <span>↗</span></button><label class="file-pick">または写真を選ぶ <input id="photoInput" type="file" accept="image/*"></label></div>
+          <div id="photoEmpty" class="photo-empty"><div class="empty-illustration"><span>◯</span><span>✦</span></div><h3>ガイドに合わせてネイルを測る</h3><p>まず10円玉・100円玉を画面の円に合わせ、続いて爪を横線に映します。撮影ボタンは不要で、結果を確認して保存できます。</p><button id="startCameraBtn" type="button" class="btn btn-primary">ライブガイドで計測 <span>↗</span></button><div class="photo-alternative"><button id="startLegacyCameraBtn" type="button" class="btn btn-ghost small">写真撮影で計測する</button><label class="file-pick">写真を読み込む <input id="photoInput" type="file" accept="image/*"></label></div></div>
+          <div id="liveGuideView" class="live-guide-view hidden">
+            <div class="live-guide-viewport">
+              <video id="liveVideo" autoplay muted playsinline aria-label="爪と硬貨を映すリアルタイムカメラ"></video>
+              <canvas id="liveOverlay" aria-hidden="true"></canvas>
+              <div class="live-guide-head"><span id="liveStage">STEP 1 / 硬貨の基準合わせ</span><strong id="liveValue">—</strong></div>
+            </div>
+            <div id="liveHint" class="live-hint">硬貨の外周を画面の円形ガイドに合わせてください。</div>
+            <div id="liveStatus" class="live-status" role="status" aria-live="polite">カメラを準備しています…</div>
+            <div class="live-actions">
+              <button id="liveConfirmCoin" type="button" class="btn btn-primary">この位置で基準を設定 <span>→</span></button>
+              <button id="liveSaveNail" type="button" class="btn btn-primary hidden" disabled>この爪の幅を保存 <span>→</span></button>
+              <button id="liveRecalibrate" type="button" class="btn btn-outline hidden">硬貨の基準をやり直す</button>
+              <button id="liveClose" type="button" class="btn btn-ghost">計測を終了</button>
+            </div>
+            <div class="live-caution"><strong>重要：</strong>硬貨と爪は同じ高さの面に置き、硬貨の基準合わせ後はスマホと対象物の距離を変えないでください。カメラの距離が変わった場合は基準を取り直してください。色差が不明瞭な場合は「写真撮影で計測する」を利用できます。</div>
+          </div>
           <div id="cameraView" class="camera-view hidden"><video id="cameraVideo" autoplay muted playsinline></video><div class="camera-guide"><span>上から、爪と硬貨が一緒に写るように</span></div><div class="camera-controls"><button id="cameraStopBtn" type="button" class="btn btn-light">キャンセル</button><button id="captureBtn" type="button" class="shutter" aria-label="撮影"><span></span></button><button id="switchCameraBtn" type="button" class="btn btn-light">カメラ切替</button></div></div>
           <div id="photoEditor" class="photo-editor hidden"><div class="canvas-shell"><canvas id="editorCanvas" aria-label="撮影写真。画像をタップして計測点を指定してください"></canvas><div class="canvas-top"><span id="canvasMode" class="canvas-mode">硬貨の両端を選択</span><span id="canvasMetric" class="canvas-metric">2点を指定してください</span></div><div class="canvas-bottom"><button id="zoomOutBtn" type="button" aria-label="縮小">−</button><span id="zoomLabel">100%</span><button id="zoomInBtn" type="button" aria-label="拡大">＋</button><button id="zoomResetBtn" type="button" aria-label="表示をリセット">⤢</button></div></div><div class="canvas-instructions" id="canvasInstructions" role="status">硬貨の外周の左端と右端を順にタップ。置いた丸はドラッグで微調整できます。</div><div class="editor-actions"><button id="autoDetectBtn" type="button" class="btn btn-outline">自動認識をやり直す</button><button id="coinAssistBtn" type="button" class="btn btn-outline hidden">硬貨の中心をタップして補正</button><button id="resetPointsBtn" type="button" class="btn btn-outline">2点を指定し直す</button><button id="confirmPointsBtn" type="button" class="btn btn-primary" disabled>この位置で確定 <span>→</span></button></div><div class="photo-bottom"><button id="retakeBtn" type="button" class="quiet-btn">↻ 写真を撮り直す</button><label class="quiet-btn">▣ 別の写真を選ぶ <input id="photoReplaceInput" type="file" accept="image/*"></label></div></div>
           <p id="statusMessage" class="status-message hidden" role="status"></p>
@@ -48,6 +64,7 @@
   <footer class="footer wrap"><div class="brand"><span class="brand-mark">✳</span><span>Nail <em>Mii</em></span></div><p>Little measurements, lovely nails.</p><span>Made for sharing · Local-first</span></footer>
   <div id="toast" role="status" class="toast hidden"></div>
   <script src="vision.js" defer></script>
+  <script src="live-guide.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>
